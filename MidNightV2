@@ -1,1 +1,33 @@
-loadstring(game:HttpGet("https://pandadevelopment.net/virtual/file/4d7818be17d73f71"))()
+local function encrypt(data, key)
+    local encrypted = {}
+    for i = 1, #data do
+        encrypted[i] = string.char(string.byte(data, i) ~ key)
+    end
+    return table.concat(encrypted)
+end
+
+local function decrypt(data, key)
+    local decrypted = {}
+    for i = 1, #data do
+        decrypted[i] = string.char(string.byte(data, i) ~ key)
+    end
+    return table.concat(decrypted)
+end
+
+local key = Geeked
+local encryptedScript = encrypt(game:HttpGet("https://pandadevelopment.net/virtual/file/4d7818be17d73f71"), key)
+
+local function loadScript(encryptedScript, key)
+    local decryptedScript = decrypt(encryptedScript, key)
+    loadstring(decryptedScript)()
+end
+
+local function antiDebug()
+    local debugHook = debug.gethook()
+    if debugHook then
+        debug.sethook()
+    end
+end
+
+antiDebug()
+loadScript(encryptedScript, key)
