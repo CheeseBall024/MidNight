@@ -1,33 +1,308 @@
-local function encrypt(data, key)
-    local encrypted = {}
-    for i = 1, #data do
-        encrypted[i] = string.char(string.byte(data, i) ~ key)
+-- Legitbot Tab
+local legit = pages.Legitbot
+local llayout = Instance.new("UIListLayout", legit)
+llayout.Padding = UDim.new(0,6)
+llayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+createToggle("Enable Aim Assist", Settings.AimAssistEnabled, legit, function(v) Settings.AimAssistEnabled = v end)
+
+-- FOV Circle toggle + color picker
+local colorBtn = Instance.new("TextButton")
+colorBtn.Text = "Color"
+colorBtn.Font = Enum.Font.GothamBold
+colorBtn.TextSize = 14
+colorBtn.Size = UDim2.new(0,30,0,20)
+colorBtn.BackgroundColor3 = Settings.FOVCircleColor
+colorBtn.BorderSizePixel = 0
+local presetColors = {
+    Color3.fromRGB(255,80,80),
+    Color3.fromRGB(80,255,80),
+    Color3.fromRGB(80,80,255),
+    Color3.fromRGB(255,255,80),
+}
+local ci = 1
+colorBtn.MouseButton1Click:Connect(function()
+    ci = ci % #presetColors + 1
+    Settings.FOVCircleColor = presetColors[ci]
+    colorBtn.BackgroundColor3 = Settings.FOVCircleColor
+end)
+createToggle("Show FOV Circle", Settings.FOVCircleEnabled, legit, function(v) Settings.FOVCircleEnabled = v end, colorBtn)
+
+-- Sliders helper (used for Aim FOV and Aim Smoothness)
+local function createSlider(labelText, minVal, maxVal, defaultVal, onChanged)
+    local cont = Instance.new("Frame", legit)
+    cont.Size = UDim2.new(1,0,0,40)
+    cont.BackgroundTransparency = 1
+
+    local label = Instance.new("TextLabel", cont)
+    label.Size = UDim2.new(0.4,-5,1,0)
+    label.Position = UDim2.new(0,5,0,0)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 14
+    label.TextColor3 = Color3.fromRGB(200,200,200)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = string.format("%s: %d", labelText, defaultVal)
+
+    local bar = Instance.new("Frame", cont)
+    bar.Size = UDim2.new(0.55,0,0,6)
+    bar.Position = UDim2.new(0.45,0,0.5,-3)
+    bar.BackgroundColor3 = Color3.fromRGB(60,60,60)
+
+    local fill = Instance.new("Frame", bar)
+    local pct = (defaultVal - minVal) / (maxVal - minVal)
+    fill.Size = UDim2.new(pct,0,1,0)
+    fill.BackgroundColor3 = Settings.FOVCircleColor
+
+    local knob = Instance.new("ImageButton", bar)
+    knob.Size = UDim2.new(0,14,0,14)
+    knob.AnchorPoint = Vector2.new(0.5,0.5)
+    knob.Position = UDim2.new(pct,0,0.5,0)
+    knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    knob.Image = ""
+
+    local dragging = false
+    knob.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end end)
+    knob.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+    UserInputService.InputChanged:Connect(function(i)
+        if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then
+            local rel = math.clamp(i.Position.X - bar.AbsolutePosition.X, 0, bar.AbsoluteSize.X)
+            local newPct = rel / bar.AbsoluteSize.X
+            local newVal = math.floor(minVal + (maxVal-minVal)*newPct + 0.5)
+            fill.Size = UDim2.new(newPct,0,1,0)
+            knob.Position = UDim2.new(newPct,0,0.5,0)
+            label.Text = string.format("%s: %d", labelText, newVal)
+            onChanged(newVal)
+        end
+    end)
+    bar.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            local rel = math.clamp(i.Position.X - bar.AbsolutePosition.X, 0, bar.AbsoluteSize.X)
+            local newPct = rel / bar.AbsoluteSize.X
+            local newVal = math.floor(minVal + (maxVal-minVal)*newPct + 0.5)
+            fill.Size = UDim2.new(newPct,0,1,0)
+            knob.Position = UDim2.new(newPct,0,0.5,0)
+            label.Text = string.format("%s: %d", labelText, newVal)
+            onChanged(newVal)
+        end
+    end)
+end
+
+-- Keep only the Aim-related sliders
+createSlider("Aim FOV", 1, 180, Settings.AimFOV, function(v) Settings.AimFOV = v end)
+createSlider("Aim Smoothness", 1, 20, Settings.AimSmoothness, function(v) Settings.AimSmoothness = v end)
+
+-- FOV color presets for aimCircle usage elsewhere
+local fovColors = {
+    Color3.fromRGB(255,255,255),  -- white
+    Color3.fromRGB(255,0,0),      -- red
+    Color3.fromRGB(0,255,0),      -- green
+    Color3.fromRGB(0,0,255),      -- blue
+}
+local colorIndex = 1
+
+-- Create the “Show FOV Circle” toggle helper (if needed elsewhere)
+local function addFOVCircleToggle(parent)
+    local colorBtn = Instance.new("TextButton")
+    colorBtn.Text = "Color"
+    colorBtn.MouseButton1Click:Connect(function()
+        colorIndex = colorIndex % #fovColors + 1
+        Settings.FOVCircleColor = fovColors[colorIndex]
+        if aimCircle then aimCircle.Color = Settings.FOVCircleColor end
+    end)
+
+    createToggle("Show FOV Circle",
+        Settings.FOVCircleEnabled,
+        parent,
+        function(on)
+            Settings.FOVCircleEnabled = on
+            if aimCircle then aimCircle.Visible = on end
+        end,
+        colorBtn
+    )
+end
+
+-- "Aim at" selector (kept)
+do
+    local row = Instance.new("Frame", legit)
+    row.Size = UDim2.new(1,0,0,30)
+    row.BackgroundTransparency = 1
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Text = "Aim at:"
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 14
+    lbl.TextColor3 = Color3.fromRGB(200,200,200)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(0.4,0,1,0)
+    lbl.Position = UDim2.new(0,5,0,0)
+
+    local bones = {"Head","Torso","Legs"}
+    local bi = table.find(bones, Settings.AimTarget) or 1
+
+    local pickBtn = Instance.new("TextButton", row)
+    pickBtn.Text = bones[bi]
+    pickBtn.Font = Enum.Font.GothamBold
+    pickBtn.TextSize = 14
+    pickBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    pickBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+    pickBtn.BorderSizePixel = 0
+    pickBtn.Size = UDim2.new(0.5,-10,1,-6)
+    pickBtn.Position = UDim2.new(0.5,5,0,3)
+
+    pickBtn.MouseButton1Click:Connect(function()
+        bi = bi % #bones + 1
+        Settings.AimTarget = bones[bi]
+        pickBtn.Text = bones[bi]
+    end)
+end
+
+-- Aim Assist logic (kept — assumes aimCircle exists in scope)
+RunService.RenderStepped:Connect(function()
+    if not Settings.AimAssistEnabled then
+        if aimCircle then aimCircle.Visible = false end
+        return
     end
-    return table.concat(encrypted)
-end
 
-local function decrypt(data, key)
-    local decrypted = {}
-    for i = 1, #data do
-        decrypted[i] = string.char(string.byte(data, i) ~ key)
+    local camera = workspace.CurrentCamera
+    local vpSize = camera.ViewportSize
+    local center = Vector2.new(vpSize.X/2, vpSize.Y/2)
+
+    -- pixel-radius (180° → full width)
+    local pxRadius = center.X * (Settings.AimFOV / 180)
+    if aimCircle then
+        aimCircle.Radius   = pxRadius
+        aimCircle.Position = center
+        aimCircle.Color    = Settings.FOVCircleColor
+        aimCircle.Visible  = Settings.FOVCircleEnabled
     end
-    return table.concat(decrypted)
-end
 
-local key = Geeked
-local encryptedScript = encrypt(game:HttpGet("https://pandadevelopment.net/virtual/file/4d7818be17d73f71"), key)
-
-local function loadScript(encryptedScript, key)
-    local decryptedScript = decrypt(encryptedScript, key)
-    loadstring(decryptedScript)()
-end
-
-local function antiDebug()
-    local debugHook = debug.gethook()
-    if debugHook then
-        debug.sethook()
+    -- find best target within pxRadius
+    local bestTarget, bestDist
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= localPlayer and plr.Team ~= localPlayer.Team then
+            local c   = plr.Character
+            local hrp = c and c:FindFirstChild("HumanoidRootPart")
+            local hum = c and c:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 0 then
+                local spos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+                if onScreen then
+                    local screenPos = Vector2.new(spos.X, spos.Y)
+                    local d2 = (screenPos - center).Magnitude
+                    if d2 <= pxRadius and (not bestDist or d2 < bestDist) then
+                        bestDist = d2
+                        local aimPart
+                        if Settings.AimTarget == "Head" then
+                            aimPart = c:FindFirstChild("Head")
+                        elseif Settings.AimTarget == "Torso" then
+                            aimPart = c:FindFirstChild("UpperTorso") or hrp
+                        else
+                            aimPart = c:FindFirstChild("LeftFoot")
+                                       or c:FindFirstChild("RightFoot")
+                                       or hrp
+                        end
+                        bestTarget = aimPart and aimPart.Position
+                    end
+                end
+            end
+        end
     end
-end
 
-antiDebug()
-loadScript(encryptedScript, key)
+    -- smooth‐lerp camera toward chosen bone
+    if bestTarget then
+        local cf   = camera.CFrame
+        local dir  = (bestTarget - cf.Position).Unit
+        local goal = CFrame.new(cf.Position, cf.Position + dir)
+        camera.CFrame = cf:Lerp(goal, Settings.AimSmoothness / 10)
+    end
+end)
+
+-- ⎯⎯ Keybind + Mode Row ⎯⎯
+do
+    -- Ensure defaults
+    Settings.AimBind     = Settings.AimBind or Enum.KeyCode.RightControl
+    Settings.AimBindMode = Settings.AimBindMode or "Toggle"  -- or "Hold"
+
+    local row = Instance.new("Frame", legit)
+    row.Size = UDim2.new(1, 0, 0, 30)
+    row.BackgroundTransparency = 1
+
+    -- "Bind key:" label
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Text = "Bind key:"
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 14
+    lbl.TextColor3 = Color3.fromRGB(200,200,200)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.BackgroundTransparency = 1
+    lbl.Size = UDim2.new(0.3, 0, 1, 0)
+    lbl.Position = UDim2.new(0, 5, 0, 0)
+
+    -- Bind button
+    local bindBtn = Instance.new("TextButton", row)
+    bindBtn.Font = Enum.Font.GothamBold
+    bindBtn.TextSize = 14
+    bindBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    bindBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+    bindBtn.BorderSizePixel = 0
+    bindBtn.Size = UDim2.new(0.3, -10, 1, -6)
+    bindBtn.Position = UDim2.new(0.3, 5, 0, 3)
+    bindBtn.Text = Settings.AimBind and Settings.AimBind.Name or "None"
+
+    -- Mode button
+    local modeBtn = Instance.new("TextButton", row)
+    modeBtn.Font = Enum.Font.GothamBold
+    modeBtn.TextSize = 14
+    modeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    modeBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+    modeBtn.BorderSizePixel = 0
+    modeBtn.Size = UDim2.new(0.3, -10, 1, -6)
+    modeBtn.Position = UDim2.new(0.65, 5, 0, 3)
+    modeBtn.Text = "Mode: "..Settings.AimBindMode
+
+    -- Listen for clicks on bindBtn
+    local listening = false
+    bindBtn.MouseButton1Click:Connect(function()
+        listening = true
+        bindBtn.Text = "..."
+    end)
+
+    -- Capture key input
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if listening and input.UserInputType == Enum.UserInputType.Keyboard then
+            if input.KeyCode == Enum.KeyCode.Backspace then
+                Settings.AimBind = nil
+                bindBtn.Text = "None"
+            else
+                Settings.AimBind = input.KeyCode
+                bindBtn.Text = input.KeyCode.Name
+            end
+            listening = false
+            return
+        end
+
+        -- If not binding, handle actual aim-assist keypress
+        if not gp and Settings.AimBind == input.KeyCode then
+            if Settings.AimBindMode == "Toggle" then
+                Settings.AimAssistEnabled = not Settings.AimAssistEnabled
+            elseif Settings.AimBindMode == "Hold" then
+                Settings.AimAssistEnabled = true
+            end
+        end
+    end)
+
+    -- Release for Hold mode
+    UserInputService.InputEnded:Connect(function(input, gp)
+        if not gp and Settings.AimBindMode == "Hold"
+           and Settings.AimBind == input.KeyCode then
+            Settings.AimAssistEnabled = false
+        end
+    end)
+
+    -- Toggle between Toggle/Hold
+    modeBtn.MouseButton1Click:Connect(function()
+        Settings.AimBindMode = (Settings.AimBindMode == "Toggle") and "Hold" or "Toggle"
+        modeBtn.Text = "Mode: "..Settings.AimBindMode
+    end)
+end
